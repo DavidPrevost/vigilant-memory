@@ -68,23 +68,23 @@ Building dependency tree... Done
 0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
 ```
 
-**1.2 - Enable Camera**
+**1.2 - Camera Configuration**
+
+**On Raspberry Pi OS Bookworm (current version):**
+
+The camera is **enabled by default** using the libcamera system. No configuration is needed in raspi-config.
+
+**On older Raspberry Pi OS versions (Legacy/Bullseye):**
+
+If you're using an older OS version, you may need to enable the camera:
 
 ```bash
 # Open Raspberry Pi configuration tool
 sudo raspi-config
+# Navigate to: Interface Options > Camera > Enable
 ```
 
-**Navigation:**
-1. Arrow keys to navigate to "Interface Options"
-2. Press Enter
-3. Navigate to "Camera"
-4. Press Enter
-5. Select "Yes" to enable camera
-6. Select "Finish"
-7. Select "Yes" to reboot (or reboot manually: `sudo reboot`)
-
-**Expected Result:** Pi reboots
+**Note:** If you don't see a "Camera" option in raspi-config Interface Options, this confirms you're on Bookworm or later, and the camera is already enabled. Proceed to the next step to verify camera connection.
 
 **1.3 - Verify Camera Connection**
 
@@ -110,8 +110,9 @@ Available cameras
 - Check ribbon cable connection (blue tab facing USB ports)
 - Ensure cable fully inserted in both camera and Pi
 - Try different CSI port if Pi has multiple
-- Re-enable camera in raspi-config
-- Reboot again
+- On older OS versions, try re-enabling camera in raspi-config (Bookworm doesn't have this option)
+- Check `/boot/firmware/config.txt` for `camera_auto_detect=1` (should be enabled)
+- Reboot: `sudo reboot`
 
 **1.4 - Test Camera Capture**
 
