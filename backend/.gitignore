@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Flask
+instance/
+.webassets-cache
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Firebase credentials
+config/firebase-credentials.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp

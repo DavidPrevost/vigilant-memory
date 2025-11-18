@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - Primary Database
+  postgres:
+    image: postgres:16
+    container_name: babymonitor_postgres
+    environment:
+      POSTGRES_DB: babymonitor
+      POSTGRES_USER: babymonitor
+      POSTGRES_PASSWORD: dev_password_change_in_prod
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U babymonitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - babymonitor_network
+
+  # TimescaleDB - Time-Series Data
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: babymonitor_timescale
+    environment:
+      POSTGRES_DB: babymonitor_timeseries
+      POSTGRES_USER: babymonitor
+      POSTGRES_PASSWORD: dev_password_change_in_prod
+    ports:
+      - "5433:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./migrations/timescale_init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U babymonitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - babymonitor_network
+
+  # MQTT Broker - Device Communication
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: babymonitor_mqtt
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_logs:/mosquitto/log
+    networks:
+      - babymonitor_network
+
+  # Redis - Caching & Real-time Data
+  redis:
+    image: redis:7-alpine
+    container_name: babymonitor_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - babymonitor_network
+
+  # MinIO - S3-compatible Object Storage for Videos
+  minio:
+    image: minio/minio:latest
+    container_name: babymonitor_minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin_change_in_prod
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - babymonitor_network
+
+volumes:
+  postgres_data:
+  timescale_data:
+  mosquitto_data:
+  mosquitto_logs:
+  redis_data:
+  minio_data:
+
+networks:
+  babymonitor_network:
+    driver: bridge
