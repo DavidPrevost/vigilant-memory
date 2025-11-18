@@ -1,153 +1,160 @@
 # Baby Monitor Firmware
 
-Firmware for the baby monitor device running on Raspberry Pi 4.
+Complete firmware for the baby monitor device running on Raspberry Pi.
 
-## Current Phase: Phase 1 - Camera + Basic Streaming
+## Current Implementation Status
 
-### Features Implemented
-- ✅ Camera capture (720p @ 30fps)
-- ✅ MJPEG streaming over HTTP
-- ✅ Web interface for live viewing
-- ✅ Snapshot capture
-- ✅ Status API
+### ✅ Phase 1: Camera + Basic Streaming
+- Camera capture (720p/1080p @ 30fps)
+- MJPEG streaming over HTTP
+- Web interface for live viewing
+- Snapshot capture
+- H.264 video recording
 
-### Coming Next (Phase 2)
+### ✅ Phase 3: Environmental Sensors (Ready)
+- BME680: Temperature, humidity, pressure, air quality
+- BH1750: Ambient light measurement
+- ADXL345: Motion/vibration detection
+- Automatic periodic sensor readings
+- Sensor data upload to backend
+
+### ✅ Phase 4: Backend Integration
+- Device registration with backend
+- MQTT real-time communication
+- Video upload to cloud storage
+- Event reporting
+- System health monitoring
+- Remote command execution
+
+### ⏳ Phase 2: Audio + WebRTC (Not Yet Implemented)
 - Two-way audio
 - WebRTC streaming (low latency)
 - Lullaby playback
 
 ---
 
-## Quick Start (On Raspberry Pi)
+## Architecture
 
-### Prerequisites
-- Raspberry Pi 4 (4GB or 8GB)
-- Camera Module 3 connected
-- Raspberry Pi OS (64-bit) installed
-- Internet connection
+The firmware integrates with the backend infrastructure:
 
-### Installation
-
-```bash
-# 1. Clone repository (if not already done)
-cd ~
-git clone https://github.com/your-org/baby-monitor.git
-cd baby-monitor/firmware
-
-# 2. Run setup script
-chmod +x setup.sh
-./setup.sh
-
-# 3. Activate virtual environment
-source venv/bin/activate
-
-# 4. Test camera
-python src/camera.py
-
-# 5. Start web server
-python src/web_server.py
+```
+┌─────────────────┐
+│  Raspberry Pi   │
+│   Baby Monitor  │
+├─────────────────┤
+│                 │
+│  Camera ────────┼──► MJPEG Stream (Local)
+│  Sensors ───────┼──► Backend API (HTTP)
+│  System Monitor─┼──► Backend API (HTTP)
+│                 │
+│  MQTT Client ───┼──► MQTT Broker ◄──► Backend
+│  Video Uploader─┼──► Backend API (HTTP) ──► MinIO
+│                 │
+└─────────────────┘
 ```
 
-### Access the Monitor
-
-Once the server is running:
-- **From same network:** http://raspberrypi.local:5000
-- **Or use IP address:** http://192.168.1.XXX:5000
+**Communication Channels:**
+- **HTTP REST API**: Device registration, status updates, video uploads, sensor data
+- **MQTT**: Real-time telemetry, events, commands from backend
+- **Local HTTP**: Web interface for direct access on local network
 
 ---
 
-## Manual Setup (Detailed)
+## Quick Start
 
-### 1. System Dependencies
+### 1. Hardware Setup
+
+**Required:**
+- Raspberry Pi 4/5 (4GB+ recommended)
+- Camera Module 3 (or compatible)
+- MicroSD card (32GB+, A2 rated)
+- Power supply (official 27W USB-C for Pi 5)
+
+**Optional (Phase 3):**
+- BME680 sensor (temperature, humidity, air quality)
+- BH1750 sensor (light level)
+- ADXL345 sensor (motion/vibration)
+
+### 2. Installation
 
 ```bash
-# Update system
-sudo apt update
-sudo apt upgrade -y
+# Clone repository
+cd ~
+git clone https://github.com/DavidPrevost/vigilant-memory.git
+cd vigilant-memory/firmware
 
-# Enable camera
-sudo raspi-config
-# Navigate to: Interface Options > Camera > Enable
-
-# Install system packages
-sudo apt install -y \
-    python3-pip \
-    python3-venv \
-    libcap-dev \
-    libopencv-dev \
-    libavcodec-dev \
-    libavformat-dev
+# Run automated setup
+chmod +x setup.sh
+./setup.sh
 ```
 
-### 2. Python Environment
+This will:
+- Check Python version (3.10+ required)
+- Create virtual environment
+- Install all dependencies
+- Verify camera detection
+
+### 3. Register Device
+
+**Before starting the firmware, register with backend:**
 
 ```bash
-# Create virtual environment
-python3 -m venv venv
-
-# Activate it
+# Activate virtual environment
 source venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt
+# Register device
+python src/device_manager.py --register \
+  --name "Nursery Monitor" \
+  --backend http://your-server-ip:5000
+
+# Verify registration
+python src/device_manager.py --status
 ```
 
-This will take 10-15 minutes on Raspberry Pi.
+**Output:**
+```
+✅ Device registered successfully!
+Device ID: 5f8d3a1c-9b2e-4f7a-8c3d-1e6f9a4b2c7d
+MQTT Client ID: device_5f8d3a1c9b2e
 
-### 3. Test Camera
+Configuration saved to: /etc/babymonitor/config.json
+```
 
+### 4. Start the Monitor
+
+**Option A: Run manually (for testing)**
 ```bash
-# Test with libcamera first
-libcamera-hello --timeout 5000
-
-# Test with our Python script
-python src/camera.py
+python src/main.py
 ```
 
-Expected output:
-```
-Baby Monitor - Camera Test
-==================================================
-
-1. Starting camera...
-2. Capturing test frame...
-   ✓ Captured frame (XXXXX bytes)
-   ✓ Saved to /tmp/test_frame.jpg
-3. Testing video recording (5 seconds)...
-   ✓ Recording saved to /tmp/test_video.h264
-4. Camera information:
-   Resolution: 1280x720
-   Framerate: 30 fps
-   Status: Idle
-
-✓ All tests passed!
-```
-
-### 4. Start Web Server
-
+**Option B: Install as system service (recommended)**
 ```bash
-python src/web_server.py
+# Install systemd service
+chmod +x install_service.sh
+./install_service.sh
+
+# Enable auto-start on boot
+sudo systemctl enable babymonitor
+
+# Start service now
+sudo systemctl start babymonitor
+
+# Check status
+sudo systemctl status babymonitor
+
+# View logs
+sudo journalctl -u babymonitor -f
 ```
 
-Expected output:
-```
-Baby Monitor - Web Server
-==================================================
+### 5. Access the Monitor
 
-Starting server...
-Access the monitor at: http://raspberrypi.local:5000
-Or: http://<your-pi-ip>:5000
-
-Press Ctrl+C to stop
-==================================================
-```
-
-### 5. View in Browser
-
-Open a web browser on your computer or phone (same WiFi network) and navigate to:
+**Local web interface:**
 - http://raspberrypi.local:5000
+- http://your-pi-ip:5000
 
-You should see the live video feed!
+**Via backend/mobile app:**
+- Access through your backend web dashboard
+- Use mobile app (Phase 5)
 
 ---
 
@@ -156,44 +163,167 @@ You should see the live video feed!
 ```
 firmware/
 ├── src/
-│   ├── camera.py           # Camera management module
-│   ├── web_server.py       # Flask web server
+│   ├── main.py                 # Main application orchestrator
+│   ├── config.py               # Configuration management
+│   ├── camera.py               # Camera control
+│   ├── backend_client.py       # Backend API client
+│   ├── mqtt_client.py          # MQTT communication
+│   ├── video_uploader.py       # Video upload queue
+│   ├── system_monitor.py       # System health monitoring
+│   ├── device_manager.py       # Device registration CLI
+│   ├── web_server.py           # Local web server (Phase 1)
+│   ├── sensors/
+│   │   ├── sensor_manager.py   # Sensor coordinator
+│   │   ├── bme680_sensor.py    # Temp/humidity/air quality
+│   │   ├── bh1750_sensor.py    # Light sensor
+│   │   └── adxl345_sensor.py   # Accelerometer/motion
 │   └── web/
-│       ├── static/         # Static files (CSS, JS)
-│       └── templates/      # HTML templates
-│           └── index.html  # Main web interface
-├── tests/                  # Unit tests (coming soon)
-├── requirements.txt        # Python dependencies
-├── setup.sh               # Automated setup script
-└── README.md              # This file
+│       ├── static/             # CSS, JavaScript
+│       └── templates/          # HTML templates
+├── tests/                      # Unit tests
+├── requirements.txt            # Python dependencies
+├── setup.sh                    # Automated setup
+├── install_service.sh          # Service installer
+├── babymonitor.service         # Systemd service file
+└── README.md                   # This file
 ```
 
 ---
 
-## API Endpoints
+## Configuration
 
-### GET /
-Main web interface
+### Configuration File
 
-### GET /video_feed
-MJPEG video stream
+Located at: `/etc/babymonitor/config.json`
 
-### GET /api/status
-Get camera status
+**Example:**
 ```json
 {
-  "status": "online",
-  "resolution": {"width": 1280, "height": 720},
-  "framerate": 30,
-  "recording": false
+  "device_id": "5f8d3a1c-9b2e-4f7a-8c3d-1e6f9a4b2c7d",
+  "device_name": "Nursery Monitor",
+  "backend_url": "http://server:5000",
+  "mqtt_broker_host": "server",
+  "mqtt_broker_port": 1883,
+  "camera_resolution": [1280, 720],
+  "camera_framerate": 30,
+  "sensors_enabled": true,
+  "upload_videos": true,
+  "motion_detection_enabled": false
 }
 ```
 
-### GET /api/snapshot
-Capture and download a single frame (JPEG)
+### Manage Configuration
 
-### POST /api/camera/resolution/{width}/{height}
-Change camera resolution (requires restart)
+```bash
+# View current configuration
+python src/device_manager.py --status
+
+# Update MQTT broker
+python src/device_manager.py --mqtt-host server.local --mqtt-port 1883
+
+# Unregister device
+python src/device_manager.py --unregister
+```
+
+---
+
+## Features
+
+### Camera
+
+**Capabilities:**
+- 1080p @ 30fps (or 720p for better performance)
+- H.264 hardware encoding
+- MJPEG streaming for local access
+- Snapshot capture
+- Event-triggered recording
+
+**Video Storage:**
+- Local buffering in `/var/babymonitor/recordings/`
+- Automatic upload to backend (MinIO/S3)
+- Configurable retention policies
+
+### Sensors (Phase 3)
+
+**BME680** - Environmental Monitoring
+- Temperature: ±0.5°C accuracy
+- Humidity: ±3% accuracy
+- Pressure: ±1 hPa
+- Air quality: Gas resistance measurement
+
+**BH1750** - Light Sensor
+- Range: 1-65535 lux
+- Used for automatic night mode
+- Room brightness monitoring
+
+**ADXL345** - Motion Detection
+- 3-axis accelerometer
+- Detects vibration/movement
+- Crib shaking detection
+
+**Automatic Readings:**
+- Every 60 seconds (configurable)
+- Sent to backend via HTTP and MQTT
+- Cached locally for latest values
+
+### Backend Integration
+
+**Device Registration:**
+- Secure device authentication
+- Unique device ID and secret
+- MQTT client credentials
+
+**Status Updates:**
+- CPU usage, temperature
+- Memory and disk usage
+- Network connectivity
+- Battery level (if available)
+- Sent every 60 seconds
+
+**Video Uploads:**
+- Automatic queue management
+- Retry logic with exponential backoff
+- Local cleanup after successful upload
+- Failed uploads moved to `/var/babymonitor/recordings/failed/`
+
+**Event Reporting:**
+- Motion detection events
+- Sound level alerts
+- Sensor threshold violations
+- System health warnings
+
+### MQTT Communication
+
+**Published Topics:**
+- `devices/{device_id}/status` - Device status heartbeat
+- `devices/{device_id}/telemetry` - Sensor readings
+- `devices/{device_id}/events` - Detection events
+
+**Subscribed Topics:**
+- `devices/{device_id}/commands` - Remote commands from backend
+
+**Supported Commands:**
+- `start_recording` - Start video recording
+- `stop_recording` - Stop recording
+- `capture_snapshot` - Take snapshot
+- `update_settings` - Update configuration
+- `reboot` - Reboot device
+
+### System Monitoring
+
+**Tracked Metrics:**
+- CPU usage and temperature
+- Memory usage
+- Disk space
+- Network connectivity
+- WiFi signal strength
+- System uptime
+- Battery level (if present)
+
+**Health Checks:**
+- CPU temperature < 80°C
+- Disk usage < 90%
+- Memory usage < 90%
 
 ---
 
@@ -202,117 +332,260 @@ Change camera resolution (requires restart)
 ### Running Tests
 
 ```bash
-# Activate virtual environment
 source venv/bin/activate
-
-# Run tests
-pytest
-
-# Run with coverage
-pytest --cov=src tests/
+pytest tests/ -v
 ```
 
 ### Code Formatting
 
 ```bash
-# Format code
 black src/
-
-# Check code style
 flake8 src/
+```
+
+### Testing Components Individually
+
+**Test Camera:**
+```bash
+python src/camera.py
+```
+
+**Test Backend Connection:**
+```bash
+python -c "from src.backend_client import BackendClient; \
+    client = BackendClient('http://server:5000'); \
+    print('Healthy!' if client.health_check() else 'Failed')"
+```
+
+**Test Sensors:**
+```bash
+python -c "from src.sensors import SensorManager; \
+    sm = SensorManager(); \
+    sm.initialize(); \
+    print(sm.read_all())"
+```
+
+**Test MQTT:**
+```bash
+python -c "from src.mqtt_client import MQTTClient; \
+    mqtt = MQTTClient('server', 1883, 'test_device', 'client123'); \
+    mqtt.connect(); \
+    print('Connected!' if mqtt.wait_for_connection() else 'Failed')"
 ```
 
 ---
 
 ## Troubleshooting
 
-### Camera not detected
+### Device Won't Register
 
+**Check backend connectivity:**
 ```bash
-# Check if camera is connected
+curl http://your-server:5000/health
+```
+
+**Expected:**
+```json
+{"status": "healthy", "timestamp": "..."}
+```
+
+**If fails:**
+- Verify backend is running
+- Check firewall/network
+- Verify backend URL is correct
+
+### Camera Not Detected
+
+**On Raspberry Pi OS Bookworm (current):**
+- Camera is enabled by default
+- No raspi-config needed
+
+**Verify detection:**
+```bash
 libcamera-hello --list-cameras
-
-# If not detected:
-# 1. Check ribbon cable connection
-# 2. Enable camera in raspi-config
-# 3. Reboot: sudo reboot
 ```
 
-### Web server won't start
+**If not detected:**
+- Check ribbon cable connection
+- Verify cable orientation (blue tab toward USB ports)
+- Reboot: `sudo reboot`
 
+### Sensors Not Working
+
+**Check I2C is enabled:**
 ```bash
-# Check if port 5000 is already in use
-sudo lsof -i :5000
-
-# Use a different port
-python src/web_server.py --port 5001
+ls /dev/i2c-*
+# Should show: /dev/i2c-1
 ```
 
-### Cannot access from other device
-
+**Enable I2C:**
 ```bash
-# Check Raspberry Pi's IP address
-hostname -I
-
-# Make sure firewall isn't blocking
-sudo ufw allow 5000/tcp
-
-# Or disable firewall temporarily
-sudo ufw disable
+sudo raspi-config
+# Interface Options > I2C > Enable
+sudo reboot
 ```
 
-### Low frame rate
-
+**Detect sensors:**
 ```bash
-# Check CPU usage
+sudo apt install i2c-tools
+sudo i2cdetect -y 1
+```
+
+**Expected addresses:**
+- BME680: 0x76 or 0x77
+- BH1750: 0x23 or 0x5C
+- ADXL345: 0x53
+
+### Service Won't Start
+
+**Check logs:**
+```bash
+sudo journalctl -u babymonitor -n 50
+```
+
+**Common issues:**
+- Device not registered: Run `device_manager.py --register`
+- Backend not reachable: Check network/firewall
+- Camera busy: Kill other camera processes
+- Permission issues: Check file ownership
+
+### High CPU/Temperature
+
+**Monitor resources:**
+```bash
 htop
-
-# Check temperature
 vcgencmd measure_temp
+```
 
-# If overheating, add cooling or reduce resolution
+**Solutions:**
+- Reduce camera resolution to 720p
+- Lower framerate to 24fps
+- Add heatsink/fan
+- Disable unnecessary features
+
+### MQTT Connection Fails
+
+**Test MQTT broker:**
+```bash
+# Install mosquitto clients
+sudo apt install mosquitto-clients
+
+# Test connection
+mosquitto_sub -h your-server -p 1883 -t 'test' -v
+```
+
+**Check configuration:**
+```bash
+python src/device_manager.py --status
+# Verify mqtt_broker_host and mqtt_broker_port
 ```
 
 ---
 
-## Performance Notes
+## System Service Management
 
-**Current Performance (Raspberry Pi 4, 4GB):**
-- Resolution: 1280x720 (720p)
-- Frame rate: 30 fps
-- CPU usage: ~25-35%
-- Latency: ~200-300ms (MJPEG over HTTP)
+**Start service:**
+```bash
+sudo systemctl start babymonitor
+```
 
-**Tips for better performance:**
-- Use Ethernet instead of WiFi
-- Reduce resolution to 640x480 for slower networks
-- Close other applications on Pi
-- Ensure good cooling (heatsink/fan)
+**Stop service:**
+```bash
+sudo systemctl stop babymonitor
+```
+
+**Restart service:**
+```bash
+sudo systemctl restart babymonitor
+```
+
+**Check status:**
+```bash
+sudo systemctl status babymonitor
+```
+
+**View logs:**
+```bash
+# Live logs
+sudo journalctl -u babymonitor -f
+
+# Last 100 lines
+sudo journalctl -u babymonitor -n 100
+
+# Since boot
+sudo journalctl -u babymonitor -b
+```
+
+**Enable auto-start:**
+```bash
+sudo systemctl enable babymonitor
+```
+
+**Disable auto-start:**
+```bash
+sudo systemctl disable babymonitor
+```
+
+---
+
+## Performance
+
+**Raspberry Pi 4 (4GB):**
+- 720p @ 30fps: ~25-30% CPU
+- 1080p @ 30fps: ~35-45% CPU
+- With sensors: +5% CPU
+- Temperature: 45-55°C (with heatsink)
+- Memory: ~200-300MB
+
+**Network:**
+- MJPEG local stream: ~1.5-3 Mbps
+- Video upload: Depends on recording
+- MQTT: <1 KB/s
+- HTTP status: <1 KB/min
+
+**Storage:**
+- Firmware: ~100MB
+- Recordings (temporary): Varies
+- Logs: ~1MB/day
+
+---
+
+## Security Notes
+
+- Device credentials stored in `/etc/babymonitor/config.json`
+- Ensure proper file permissions (600)
+- Use HTTPS for backend in production
+- Use TLS for MQTT in production
+- Videos encrypted if backend configured for E2E
 
 ---
 
 ## Next Steps
 
-After verifying Phase 1 works:
+**Phase 2: Audio + WebRTC**
+- Two-way audio communication
+- Low-latency WebRTC streaming
+- Lullaby playback
 
-1. **Phase 2:** Add audio and WebRTC
-   - See: `/docs/06-development-roadmap.md`
+**Phase 5: Mobile App**
+- Flutter mobile app
+- Push notifications
+- Remote access
 
-2. **Phase 3:** Add environmental sensors
-   - Temperature, humidity, light, motion
-
-3. **Phase 4:** Cloud integration
-   - User accounts, cloud storage, remote access
+**Production Hardware:**
+- Test on RK3588 (Pro model)
+- Test on RV1126 (Core model)
+- Custom PCB integration
 
 ---
 
 ## Support
 
-**Documentation:** See `/docs` directory
-**Issues:** Report at GitHub repository
-**Questions:** See troubleshooting section above
+**Documentation:** `/docs` directory in repository
+**Backend Setup:** See `backend/README.md`
+**Testing Procedures:** See `docs/10-testing-procedures.md`
 
 ---
 
-**Current Version:** 0.1.0 (Phase 1 Prototype)
-**Last Updated:** 2025-11-17
+**Current Version:** 1.0.0 (Phase 1 + 3 + 4 Integration)
+**Last Updated:** 2025-11-18
