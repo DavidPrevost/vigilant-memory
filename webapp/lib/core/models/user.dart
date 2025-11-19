@@ -192,6 +192,8 @@ class UsageStats with _$UsageStats {
     required int eventsCount,
   }) = _UsageStats;
 
+  const UsageStats._();
+
   factory UsageStats.fromJson(Map<String, dynamic> json) => _$UsageStatsFromJson(json);
 
   // Helper methods
