@@ -36,7 +36,7 @@ class AppConstants {
   static const String fontFamily = 'Inter';
 
   // Storage Keys
-  static const String themeMode Key = 'theme_mode';
+  static const String themeModeKey = 'theme_mode';
   static const String temperatureUnitKey = 'temperature_unit';
   static const String defaultViewKey = 'default_view';
 

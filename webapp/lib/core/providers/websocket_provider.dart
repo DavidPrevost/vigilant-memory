@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/websocket_client.dart';
+import 'auth_provider.dart';
 export '../api/websocket_client.dart'
     show
         WebSocketStatus,
@@ -68,9 +69,6 @@ class WebSocketManager extends StateNotifier<bool> {
     super.dispose();
   }
 }
-
-// Import auth provider (forward declaration to avoid circular dependency)
-import 'auth_provider.dart';
 
 // WebSocket Manager Provider
 final webSocketManagerProvider = StateNotifierProvider<WebSocketManager, bool>((ref) {
