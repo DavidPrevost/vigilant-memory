@@ -1,0 +1,35 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Logs
+logs/
+*.log
+
+# Recordings
+recordings/
+temp/
+*.h264
+*.mp4
+*.avi
+
+# Test outputs
+test_*.jpg
+test_*.png
+/tmp/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,29 @@
+[Unit]
+Description=Baby Monitor Service
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/vigilant-memory/firmware
+ExecStart=/home/pi/vigilant-memory/firmware/venv/bin/python /home/pi/vigilant-memory/firmware/src/main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Environment
+Environment="PATH=/home/pi/vigilant-memory/firmware/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Resource limits
+MemoryLimit=512M
+CPUQuota=80%
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

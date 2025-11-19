@@ -1,0 +1,716 @@
+# Database Design
+
+This document defines the complete database schema for both the primary PostgreSQL database and the TimescaleDB time-series database.
+
+## Database Architecture
+
+We use a **two-database approach**:
+
+1. **Primary Database (PostgreSQL):** Users, devices, subscriptions, video metadata
+2. **Time-Series Database (TimescaleDB):** Sensor readings, device metrics, analytics events
+
+**Rationale:**
+- Security isolation (user PII separate from sensor data)
+- Performance optimization (time-series DB optimized for high-volume writes)
+- Scalability (can move to separate servers independently)
+
+## Primary Database Schema
+
+### Users Table
+
+Stores user account information.
+
+```sql
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    firebase_uid VARCHAR(128) UNIQUE NOT NULL,  -- Firebase Auth UID
+    display_name VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_login_at TIMESTAMP WITH TIME ZONE,
+    is_active BOOLEAN DEFAULT TRUE,
+    email_verified BOOLEAN DEFAULT FALSE,
+
+    CONSTRAINT email_format CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}$')
+);
+
+CREATE INDEX idx_users_firebase_uid ON users(firebase_uid);
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_created_at ON users(created_at DESC);
+```
+
+**Notes:**
+- Firebase handles authentication, we store minimal user data
+- `firebase_uid` links to Firebase Auth user
+- Email stored for communication (password resets, etc.)
+
+### Subscriptions Table
+
+Tracks user subscription tiers and status.
+
+```sql
+CREATE TYPE subscription_tier AS ENUM (
+    'free',
+    'cloud_storage',
+    'ai_insights',
+    'complete'
+);
+
+CREATE TYPE subscription_status AS ENUM (
+    'active',
+    'past_due',
+    'canceled',
+    'trialing'
+);
+
+CREATE TABLE subscriptions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tier subscription_tier NOT NULL DEFAULT 'free',
+    status subscription_status NOT NULL DEFAULT 'active',
+    stripe_subscription_id VARCHAR(255) UNIQUE,
+    stripe_customer_id VARCHAR(255),
+    current_period_start TIMESTAMP WITH TIME ZONE,
+    current_period_end TIMESTAMP WITH TIME ZONE,
+    cancel_at_period_end BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+
+    CONSTRAINT one_subscription_per_user UNIQUE(user_id)
+);
+
+CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
+CREATE INDEX idx_subscriptions_stripe_customer ON subscriptions(stripe_customer_id);
+CREATE INDEX idx_subscriptions_tier ON subscriptions(tier);
+CREATE INDEX idx_subscriptions_status ON subscriptions(status);
+```
+
+**Notes:**
+- One subscription per user (covers all their devices)
+- Stripe integration for payment processing
+- Free tier is default (no payment required)
+
+### Devices Table
+
+Stores baby monitor device information.
+
+```sql
+CREATE TYPE device_model AS ENUM ('core', 'pro');
+CREATE TYPE device_status AS ENUM ('active', 'inactive', 'offline');
+
+CREATE TABLE devices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id VARCHAR(64) UNIQUE NOT NULL,  -- Hardware-generated unique ID
+    owner_id UUID REFERENCES users(id) ON DELETE SET NULL,  -- NULL if unpaired
+    name VARCHAR(255) NOT NULL DEFAULT 'Baby Monitor',
+    model device_model NOT NULL,
+    status device_status DEFAULT 'inactive',
+    firmware_version VARCHAR(32),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    paired_at TIMESTAMP WITH TIME ZONE,
+    last_seen_at TIMESTAMP WITH TIME ZONE,
+    registration_code VARCHAR(12),  -- 6-digit pairing code, temporary
+    registration_code_expires_at TIMESTAMP WITH TIME ZONE,
+
+    -- Settings (JSONB for flexibility)
+    settings JSONB DEFAULT '{
+        "motion_sensitivity": 50,
+        "sound_threshold": 60,
+        "night_vision_enabled": true,
+        "led_brightness": 50,
+        "temperature_unit": "fahrenheit",
+        "alert_preferences": {
+            "motion": true,
+            "sound": true,
+            "temperature": true,
+            "offline": true
+        }
+    }'::jsonb,
+
+    -- Feature flags based on subscription tier
+    features_enabled JSONB DEFAULT '{
+        "local_streaming": true,
+        "remote_viewing": false,
+        "cloud_storage": false,
+        "ai_detection": false,
+        "pattern_analysis": false
+    }'::jsonb
+);
+
+CREATE INDEX idx_devices_device_id ON devices(device_id);
+CREATE INDEX idx_devices_owner_id ON devices(owner_id);
+CREATE INDEX idx_devices_status ON devices(status);
+CREATE INDEX idx_devices_last_seen ON devices(last_seen_at DESC);
+CREATE INDEX idx_devices_registration_code ON devices(registration_code)
+    WHERE registration_code IS NOT NULL;
+```
+
+**Notes:**
+- `device_id`: Generated by hardware on first boot (MAC address based)
+- `registration_code`: Temporary 6-digit code shown on device for pairing
+- `owner_id` can be NULL (unpaired device or de-registered for resale)
+- Settings stored as JSONB for flexibility
+- Feature flags updated based on user's subscription tier
+
+### Events Table
+
+Records motion, sound, and AI detection events.
+
+```sql
+CREATE TYPE event_type AS ENUM (
+    'motion',
+    'sound',
+    'cry_detected',
+    'person_detected',
+    'sleep_position_change',
+    'temperature_alert',
+    'offline',
+    'online'
+);
+
+CREATE TABLE events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    event_type event_type NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    confidence DECIMAL(5,4),  -- AI confidence (0.0000 to 1.0000)
+
+    -- Event-specific metadata
+    metadata JSONB DEFAULT '{}'::jsonb,
+    -- Examples:
+    -- Motion: {"area": "crib", "intensity": 0.75}
+    -- Cry: {"duration_seconds": 15, "cry_type": "hungry"}
+    -- Person: {"bbox": [x, y, w, h], "person_count": 1}
+    -- Temperature: {"current": 72.5, "threshold": 75.0}
+
+    -- Associated media
+    video_url TEXT,  -- URL to video clip in MinIO
+    thumbnail_url TEXT,  -- URL to thumbnail image
+    video_duration_seconds INTEGER,
+
+    -- User actions
+    viewed BOOLEAN DEFAULT FALSE,
+    saved BOOLEAN DEFAULT FALSE,
+    dismissed BOOLEAN DEFAULT FALSE,
+
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_events_device_id ON events(device_id);
+CREATE INDEX idx_events_timestamp ON events(timestamp DESC);
+CREATE INDEX idx_events_type ON events(event_type);
+CREATE INDEX idx_events_device_timestamp ON events(device_id, timestamp DESC);
+CREATE INDEX idx_events_not_viewed ON events(viewed) WHERE viewed = FALSE;
+CREATE INDEX idx_events_saved ON events(saved) WHERE saved = TRUE;
+
+-- Partial index for recent events (faster queries)
+CREATE INDEX idx_events_recent ON events(device_id, timestamp DESC)
+    WHERE timestamp > NOW() - INTERVAL '7 days';
+```
+
+**Notes:**
+- One row per event detection
+- Metadata stored as JSONB for event-specific data
+- Video/thumbnail URLs point to MinIO storage
+- Partition by month for performance (see partitioning section)
+
+### Videos Table
+
+Metadata for all video recordings (continuous and events).
+
+```sql
+CREATE TYPE video_type AS ENUM ('continuous', 'event', 'saved');
+
+CREATE TABLE videos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    event_id UUID REFERENCES events(id) ON DELETE SET NULL,  -- NULL for continuous
+    video_type video_type NOT NULL,
+
+    -- File information
+    file_path TEXT NOT NULL,  -- Path in MinIO
+    file_size_bytes BIGINT,
+    duration_seconds INTEGER,
+
+    -- Video properties
+    resolution VARCHAR(16),  -- e.g., "1920x1080", "3840x2160"
+    codec VARCHAR(16),  -- e.g., "h265", "h264"
+    bitrate_kbps INTEGER,
+    fps INTEGER,
+
+    -- Timestamps
+    recorded_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE,  -- NULL if saved/permanent
+
+    -- Processing status
+    processed BOOLEAN DEFAULT FALSE,
+    thumbnail_generated BOOLEAN DEFAULT FALSE,
+
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_videos_device_id ON videos(device_id);
+CREATE INDEX idx_videos_recorded_at ON videos(recorded_at DESC);
+CREATE INDEX idx_videos_event_id ON videos(event_id);
+CREATE INDEX idx_videos_type ON videos(video_type);
+CREATE INDEX idx_videos_expires_at ON videos(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX idx_videos_device_recorded ON videos(device_id, recorded_at DESC);
+```
+
+**Notes:**
+- Continuous recordings: Large files, stored locally, may not upload to cloud
+- Event recordings: Shorter clips, uploaded to cloud for subscribers
+- Saved recordings: User-flagged, never expire
+- `expires_at` used for automatic cleanup (cloud storage retention)
+
+### Shared Devices Table
+
+Allows device owners to share access with other users.
+
+```sql
+CREATE TYPE share_permission AS ENUM ('view', 'control', 'admin');
+
+CREATE TABLE shared_devices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    shared_with_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    permission share_permission NOT NULL DEFAULT 'view',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE,  -- NULL = no expiration
+
+    CONSTRAINT no_self_sharing CHECK (owner_id != shared_with_user_id),
+    CONSTRAINT unique_device_share UNIQUE(device_id, shared_with_user_id)
+);
+
+CREATE INDEX idx_shared_devices_device ON shared_devices(device_id);
+CREATE INDEX idx_shared_devices_shared_with ON shared_devices(shared_with_user_id);
+CREATE INDEX idx_shared_devices_owner ON shared_devices(owner_id);
+```
+
+**Notes:**
+- Multiple users can view same device (e.g., both parents)
+- Permissions: view (watch only), control (talk-back, settings), admin (full access)
+- Useful for families with multiple caregivers
+
+### User Notifications Table
+
+Stores notification history and preferences.
+
+```sql
+CREATE TYPE notification_channel AS ENUM ('push', 'email', 'sms');
+CREATE TYPE notification_status AS ENUM ('pending', 'sent', 'failed', 'read');
+
+CREATE TABLE notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_id UUID REFERENCES devices(id) ON DELETE CASCADE,
+    event_id UUID REFERENCES events(id) ON DELETE SET NULL,
+
+    channel notification_channel NOT NULL,
+    status notification_status NOT NULL DEFAULT 'pending',
+
+    title VARCHAR(255) NOT NULL,
+    body TEXT NOT NULL,
+    data JSONB DEFAULT '{}'::jsonb,  -- Custom notification data
+
+    sent_at TIMESTAMP WITH TIME ZONE,
+    read_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX idx_notifications_status ON notifications(status);
+CREATE INDEX idx_notifications_created_at ON notifications(created_at DESC);
+CREATE INDEX idx_notifications_user_unread ON notifications(user_id, read_at)
+    WHERE read_at IS NULL;
+```
+
+**Notes:**
+- Currently only using push (FCM), but prepared for email/SMS
+- Stores notification history for user review
+- Can track read/unread status
+
+---
+
+## Time-Series Database Schema (TimescaleDB)
+
+TimescaleDB extends PostgreSQL with time-series optimizations. We use hypertables (automatically partitioned by time).
+
+### Sensor Readings Table
+
+Stores all environmental sensor data.
+
+```sql
+CREATE TABLE sensor_readings (
+    time TIMESTAMP WITH TIME ZONE NOT NULL,
+    device_id UUID NOT NULL,
+
+    -- Environmental sensors
+    temperature_celsius DECIMAL(5,2),
+    humidity_percent DECIMAL(5,2),
+    air_quality_index INTEGER,
+    light_level_lux INTEGER,
+    pressure_hpa DECIMAL(7,2),
+
+    -- Motion/vibration
+    vibration_detected BOOLEAN,
+    vibration_magnitude DECIMAL(6,4),
+
+    -- System metrics
+    device_uptime_seconds BIGINT,
+    cpu_usage_percent DECIMAL(5,2),
+    memory_usage_percent DECIMAL(5,2),
+    storage_usage_percent DECIMAL(5,2),
+    battery_level_percent INTEGER,
+
+    PRIMARY KEY (time, device_id)
+);
+
+-- Convert to hypertable (TimescaleDB-specific)
+SELECT create_hypertable('sensor_readings', 'time');
+
+-- Create indexes
+CREATE INDEX idx_sensor_device_time ON sensor_readings(device_id, time DESC);
+CREATE INDEX idx_sensor_temperature ON sensor_readings(time DESC, temperature_celsius)
+    WHERE temperature_celsius IS NOT NULL;
+
+-- Compression policy (compress data older than 7 days)
+ALTER TABLE sensor_readings SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'device_id'
+);
+
+SELECT add_compression_policy('sensor_readings', INTERVAL '7 days');
+
+-- Retention policy (delete data older than 90 days)
+SELECT add_retention_policy('sensor_readings', INTERVAL '90 days');
+```
+
+**Notes:**
+- Readings inserted every 30 seconds (high volume)
+- TimescaleDB automatically partitions by time (chunks)
+- Compression reduces storage by 90%+
+- Automatic retention policy deletes old data
+
+### Device Metrics Table
+
+Tracks device performance and health metrics.
+
+```sql
+CREATE TABLE device_metrics (
+    time TIMESTAMP WITH TIME ZONE NOT NULL,
+    device_id UUID NOT NULL,
+
+    -- Video metrics
+    video_bitrate_kbps INTEGER,
+    video_fps DECIMAL(5,2),
+    video_dropped_frames INTEGER,
+    encoding_latency_ms INTEGER,
+
+    -- Network metrics
+    network_upload_kbps INTEGER,
+    network_download_kbps INTEGER,
+    network_latency_ms INTEGER,
+    network_packet_loss_percent DECIMAL(5,2),
+
+    -- Streaming metrics
+    active_streams INTEGER,
+    webrtc_connection_state VARCHAR(32),
+
+    -- AI metrics (Pro model only)
+    ai_inference_time_ms INTEGER,
+    ai_detections_per_minute INTEGER,
+
+    PRIMARY KEY (time, device_id)
+);
+
+SELECT create_hypertable('device_metrics', 'time');
+CREATE INDEX idx_metrics_device_time ON device_metrics(device_id, time DESC);
+
+ALTER TABLE device_metrics SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'device_id'
+);
+
+SELECT add_compression_policy('device_metrics', INTERVAL '7 days');
+SELECT add_retention_policy('device_metrics', INTERVAL '30 days');
+```
+
+**Notes:**
+- Metrics for monitoring device health
+- Used by Grafana dashboards
+- Helps identify performance issues
+- Shorter retention (30 days) than sensor data
+
+### Analytics Events Table
+
+Tracks user interactions and feature usage.
+
+```sql
+CREATE TABLE analytics_events (
+    time TIMESTAMP WITH TIME ZONE NOT NULL,
+    user_id UUID NOT NULL,
+    device_id UUID,
+
+    event_name VARCHAR(128) NOT NULL,
+    event_category VARCHAR(64),
+
+    -- Event properties
+    properties JSONB DEFAULT '{}'::jsonb,
+
+    -- Session tracking
+    session_id UUID,
+
+    -- Client info
+    platform VARCHAR(32),  -- 'ios', 'android', 'web'
+    app_version VARCHAR(32),
+
+    PRIMARY KEY (time, user_id, event_name)
+);
+
+SELECT create_hypertable('analytics_events', 'time');
+CREATE INDEX idx_analytics_user_time ON analytics_events(user_id, time DESC);
+CREATE INDEX idx_analytics_event_name ON analytics_events(event_name, time DESC);
+CREATE INDEX idx_analytics_device_time ON analytics_events(device_id, time DESC);
+
+ALTER TABLE analytics_events SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'user_id'
+);
+
+SELECT add_compression_policy('analytics_events', INTERVAL '30 days');
+SELECT add_retention_policy('analytics_events', INTERVAL '365 days');
+```
+
+**Notes:**
+- Track feature usage, user behavior
+- Used for product analytics
+- JSONB properties for flexible event data
+- Longer retention for trend analysis
+
+---
+
+## Database Relationships
+
+```
+users
+  │
+  ├──< subscriptions (one-to-one)
+  │
+  ├──< devices (one-to-many via owner_id)
+  │     │
+  │     ├──< events (one-to-many)
+  │     │     │
+  │     │     └──< videos (one-to-one for event videos)
+  │     │
+  │     ├──< videos (one-to-many for continuous recordings)
+  │     │
+  │     └──< shared_devices (one-to-many)
+  │           │
+  │           └──> users (many-to-one via shared_with_user_id)
+  │
+  └──< notifications (one-to-many)
+
+-- Separate database (TimescaleDB):
+sensor_readings (linked via device_id, no foreign key)
+device_metrics (linked via device_id, no foreign key)
+analytics_events (linked via user_id/device_id, no foreign keys)
+```
+
+**Note:** Time-series database doesn't enforce foreign keys to primary database. Application layer handles referential integrity.
+
+---
+
+## Partitioning Strategy
+
+### Events Table Partitioning (for scale)
+
+As the events table grows, partition by month:
+
+```sql
+-- Create partitioned table (PostgreSQL 10+)
+CREATE TABLE events (
+    -- Same columns as above
+) PARTITION BY RANGE (timestamp);
+
+-- Create partitions for each month
+CREATE TABLE events_2025_01 PARTITION OF events
+    FOR VALUES FROM ('2025-01-01') TO ('2025-02-01');
+
+CREATE TABLE events_2025_02 PARTITION OF events
+    FOR VALUES FROM ('2025-02-01') TO ('2025-03-01');
+
+-- Automate partition creation with pg_partman extension
+```
+
+**Benefits:**
+- Faster queries (scan only relevant months)
+- Easy archival (detach old partitions)
+- Improved maintenance (vacuum, analyze per partition)
+
+---
+
+## Indexing Strategy
+
+### Composite Indexes
+
+For common query patterns:
+
+```sql
+-- Get recent events for a device
+CREATE INDEX idx_device_recent_events ON events(device_id, timestamp DESC);
+
+-- Get unviewed events for a user's devices
+CREATE INDEX idx_user_unviewed_events ON events(device_id, viewed)
+    WHERE viewed = FALSE;
+
+-- Get videos in a time range
+CREATE INDEX idx_device_video_timerange ON videos(device_id, recorded_at);
+```
+
+### Partial Indexes
+
+For frequently filtered data:
+
+```sql
+-- Only index active devices
+CREATE INDEX idx_active_devices ON devices(id) WHERE status = 'active';
+
+-- Only index recent events (last 30 days)
+CREATE INDEX idx_recent_events ON events(timestamp DESC)
+    WHERE timestamp > NOW() - INTERVAL '30 days';
+```
+
+---
+
+## Query Patterns & Optimizations
+
+### Common Queries
+
+**Get user's devices with latest status:**
+```sql
+SELECT d.*, s.tier, s.status as subscription_status
+FROM devices d
+JOIN users u ON d.owner_id = u.id
+LEFT JOIN subscriptions s ON u.id = s.user_id
+WHERE u.firebase_uid = $1
+ORDER BY d.last_seen_at DESC;
+```
+
+**Get recent events for a device:**
+```sql
+SELECT e.*, v.file_path as video_url
+FROM events e
+LEFT JOIN videos v ON e.id = v.event_id
+WHERE e.device_id = $1
+    AND e.timestamp > $2
+ORDER BY e.timestamp DESC
+LIMIT 50;
+```
+
+**Get sensor readings (time-series):**
+```sql
+SELECT time_bucket('5 minutes', time) AS bucket,
+       AVG(temperature_celsius) as avg_temp,
+       AVG(humidity_percent) as avg_humidity
+FROM sensor_readings
+WHERE device_id = $1
+    AND time > NOW() - INTERVAL '24 hours'
+GROUP BY bucket
+ORDER BY bucket DESC;
+```
+
+### Performance Tips
+
+1. **Use prepared statements** (avoid SQL injection, faster execution)
+2. **Limit result sets** (always use LIMIT for paginated data)
+3. **Avoid SELECT *** (fetch only needed columns)
+4. **Use EXPLAIN ANALYZE** (identify slow queries)
+5. **Connection pooling** (PgBouncer for high concurrency)
+
+---
+
+## Migrations
+
+### Using Alembic (Python)
+
+```bash
+# Create a new migration
+alembic revision --autogenerate -m "Add events table"
+
+# Apply migrations
+alembic upgrade head
+
+# Rollback one migration
+alembic downgrade -1
+```
+
+### Migration Naming Convention
+
+```
+{timestamp}_{description}.py
+Example: 2025_01_17_add_events_table.py
+```
+
+### Best Practices
+
+1. **Never edit applied migrations** (create a new one instead)
+2. **Test migrations on staging first**
+3. **Include both upgrade and downgrade** (reversibility)
+4. **Backup before major migrations**
+5. **Run during low-traffic windows**
+
+---
+
+## Backup & Recovery
+
+### Backup Strategy
+
+**Daily Backups:**
+```bash
+# Primary database
+pg_dump -h localhost -U postgres -d baby_monitor_primary > backup_$(date +%Y%m%d).sql
+
+# Time-series database
+pg_dump -h localhost -U postgres -d baby_monitor_timeseries > backup_ts_$(date +%Y%m%d).sql
+```
+
+**Continuous Archiving (WAL):**
+```bash
+# Enable in postgresql.conf
+wal_level = replica
+archive_mode = on
+archive_command = 'cp %p /backup/wal/%f'
+```
+
+**Upload to Backblaze B2:**
+```bash
+# Encrypt and upload
+gpg --encrypt backup.sql
+b2 upload-file bucket-name backup.sql.gpg backups/$(date +%Y%m%d)/
+```
+
+### Retention Policy
+
+- Daily backups: Keep 30 days
+- Weekly backups: Keep 12 weeks
+- Monthly backups: Keep 12 months
+
+### Recovery Procedure
+
+```bash
+# Restore from backup
+psql -h localhost -U postgres -d baby_monitor_primary < backup.sql
+
+# Or point-in-time recovery from WAL
+pg_restore --clean --if-exists -d baby_monitor_primary backup.dump
+```
+
+---
+
+**Last Updated:** 2025-11-17
+**Document Version:** 1.0
+**Status:** Approved
