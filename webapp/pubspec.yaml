@@ -22,8 +22,8 @@ dependencies:
   freezed_annotation: ^2.4.1
 
   # Firebase
-  firebase_core: ^2.24.2
-  firebase_auth: ^4.15.3
+  firebase_core: ^3.6.0
+  firebase_auth: ^5.3.0
 
   # UI Components
   fl_chart: ^0.66.0
