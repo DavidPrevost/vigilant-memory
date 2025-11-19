@@ -20,7 +20,7 @@ class BabyMonitorApp extends ConsumerWidget {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
-      routerConfig: AppRouter.router(authState),
+      routerConfig: AppRouter.router(authState.value),
     );
   }
 }

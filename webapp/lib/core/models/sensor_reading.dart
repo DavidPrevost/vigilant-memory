@@ -115,6 +115,8 @@ class SensorReadingFilter with _$SensorReadingFilter {
     int? offset,
   }) = _SensorReadingFilter;
 
+  const SensorReadingFilter._();
+
   factory SensorReadingFilter.fromJson(Map<String, dynamic> json) =>
       _$SensorReadingFilterFromJson(json);
 

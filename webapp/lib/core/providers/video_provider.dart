@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import '../models/video.dart';
 import '../api/api_client.dart';
 import '../api/api_endpoints.dart';
+import '../../config/constants.dart';
 import 'websocket_provider.dart';
 
 // Videos State Notifier
@@ -118,7 +119,7 @@ class VideosNotifier extends StateNotifier<AsyncValue<List<Video>>> {
 
   // Get download URL for video
   String getDownloadUrl(String videoId) {
-    return '${_apiClient._dio.options.baseUrl}${ApiEndpoints.videoDownload(videoId)}';
+    return '${AppConstants.apiBaseUrl}${ApiEndpoints.videoDownload(videoId)}';
   }
 }
 

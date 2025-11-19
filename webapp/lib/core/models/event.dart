@@ -125,6 +125,8 @@ class EventFilter with _$EventFilter {
     int? offset,
   }) = _EventFilter;
 
+  const EventFilter._();
+
   factory EventFilter.fromJson(Map<String, dynamic> json) => _$EventFilterFromJson(json);
 
   // Convert to query parameters

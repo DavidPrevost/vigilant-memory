@@ -62,6 +62,8 @@ class VideoFilter with _$VideoFilter {
     int? offset,
   }) = _VideoFilter;
 
+  const VideoFilter._();
+
   factory VideoFilter.fromJson(Map<String, dynamic> json) => _$VideoFilterFromJson(json);
 
   // Convert to query parameters
@@ -97,6 +99,8 @@ class VideoStats with _$VideoStats {
     required int manualCount,
     required int snapshotCount,
   }) = _VideoStats;
+
+  const VideoStats._();
 
   factory VideoStats.fromJson(Map<String, dynamic> json) => _$VideoStatsFromJson(json);
 
