@@ -22,7 +22,6 @@ class AppTheme {
         surface: Colors.white,
         background: const Color(0xFFF9FAFB),
       ),
-      fontFamily: AppConstants.fontFamily,
 
       // AppBar Theme
       appBarTheme: const AppBarTheme(
@@ -128,7 +127,6 @@ class AppTheme {
         surface: const Color(0xFF1F2937),
         background: const Color(0xFF111827),
       ),
-      fontFamily: AppConstants.fontFamily,
 
       // AppBar Theme
       appBarTheme: const AppBarTheme(
